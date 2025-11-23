@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Admin Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-sky-50 min-h-screen">
+  <header class="bg-white shadow">
+    <div class="max-w-6xl mx-auto px-6 py-4 flex items-center">
+      <h1 class="text-3xl font-bold text-sky-800">Dashboard Admin</h1>
+      <div class="ml-auto flex items-center gap-3">
+        <button id="btnLogout" class="text-sm text-sky-600 underline">Logout</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-6xl mx-auto p-6">
+    <section class="bg-white p-6 rounded-lg shadow mb-6">
+      <h2 class="text-lg font-semibold text-sky-700 mb-4">Daftar User & Generate API Key</h2>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <input id="first_name" placeholder="First name" class="p-3 border rounded-md focus:outline-sky-500" />
+        <input id="last_name" placeholder="Last name" class="p-3 border rounded-md focus:outline-sky-500" />
+        <input id="email" placeholder="email@example.com" class="p-3 border rounded-md focus:outline-sky-500" />
+      </div>
+
+      <div class="mt-4 flex gap-3 items-center">
+        <input id="apiKeyArea" readonly class="flex-1 p-3 border rounded-md bg-sky-50" placeholder="API Key akan muncul di sini..." />
+        <button id="genBtn" class="bg-sky-600 text-white px-4 py-2 rounded-md hover:bg-sky-700">Generate Key</button>
+        <button id="saveBtn" class="bg-emerald-600 text-white px-4 py-2 rounded-md hover:bg-emerald-700">Simpan Data User dan API Key</button>
+      </div>
+    </section>
+
+    <section class="grid grid-cols-1 gap-6">
+      <div class="bg-white p-4 rounded-lg shadow">
+        <h3 class="font-semibold text-sky-700">List User</h3>
+        <div id="listUser" class="mt-2 text-sm overflow-x-auto"></div>
+      </div>
+
+      <div class="bg-white p-4 rounded-lg shadow">
+        <h3 class="font-semibold text-sky-700">List API Key</h3>
+        <div id="listApi" class="mt-2 text-sm overflow-x-auto"></div>
+      </div>
+
+      <div class="bg-white p-4 rounded-lg shadow">
+        <h3 class="font-semibold text-sky-700">Status</h3>
+        <div id="statusBox" class="mt-2 text-sm"></div>
+      </div>
+    </section>
+  </main>
+
+<!-- Simple modal for update -->
+<div id="modal" class="fixed inset-0 hidden items-center justify-center bg-black/40">
+  <div class="bg-white rounded p-6 w-full max-w-md">
+    <h3 class="text-lg font-semibold mb-4">Update User</h3>
+    <input id="u_first" class="w-full p-2 border rounded mb-2" placeholder="First name" />
+    <input id="u_last" class="w-full p-2 border rounded mb-2" placeholder="Last name" />
+    <input id="u_email" class="w-full p-2 border rounded mb-4" placeholder="Email" />
+    <div class="flex justify-end gap-2">
+      <button id="u_cancel" class="px-4 py-2 rounded border">Batal</button>
+      <button id="u_save" class="px-4 py-2 rounded bg-sky-600 text-white">Simpan</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function getToken(){ return localStorage.getItem('admin_token'); }
+function authHeaders(){ return { 'Content-Type':'application/json', 'Authorization': 'Bearer ' + getToken() }; }
+
+document.getElementById('btnLogout').addEventListener('click', () => {
+  localStorage.removeItem('admin_token');
+  window.location.href = '/admin.html';
+});
+
+// Generate key (client side)
+document.getElementById('genBtn').addEventListener('click', () => {
+  const k = [...crypto.getRandomValues(new Uint8Array(32))].map(b=>b.toString(16).padStart(2,'0')).join('');
+  document.getElementById('apiKeyArea').value = k;
+});
+
+// Save user + API key (calls /user/create) -- supports client-supplied key
+document.getElementById('saveBtn').addEventListener('click', async () => {
+  const first_name = document.getElementById('first_name').value.trim();
+  const last_name = document.getElementById('last_name').value.trim();
+  const email = document.getElementById('email').value.trim();
+  const apiKey = document.getElementById('apiKeyArea').value.trim() || undefined;
+
+  if (!first_name || !last_name || !email) return alert('Lengkapi semua form');
+
+  try {
+    const res = await fetch('/user/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ first_name, last_name, email, apiKey })
+    });
+    const data = await res.json();
+    if (!res.ok) return alert(data.message || 'Gagal membuat user');
+    document.getElementById('apiKeyArea').value = data.apiKey;
+    alert('User tersimpan. API key dibuat.');
+    fetchUsers(); fetchApiKeys(); fetchStatus();
+    // clear input
+    document.getElementById('first_name').value = '';
+    document.getElementById('last_name').value = '';
+    document.getElementById('email').value = '';
+  } catch (err) {
+    console.error(err);
+    alert('Server error');
+  }
+});
+
+// Fetch functions (protected)
+async function fetchUsers(){
+  const res = await fetch('/admin/users', { headers: authHeaders() });
+  if (res.status === 401 || res.status === 403) { alert('Unauthorized. Silakan login ulang.'); localStorage.removeItem('admin_token'); window.location.href='/admin.html'; return; }
+  const data = await res.json();
+  const el = document.getElementById('listUser');
+  if (!data.users.length) { el.innerHTML = '<div class="text-xs text-sky-600">Belum ada user</div>'; return; }
+
+  // build table
+  let html = `<table class="min-w-full text-left border-collapse">
+    <thead><tr class="bg-sky-100"><th class="p-2 border">ID</th><th class="p-2 border">Nama Depan</th><th class="p-2 border">Nama Belakang</th><th class="p-2 border">Email</th><th class="p-2 border">API Key</th><th class="p-2 border">Status</th><th class="p-2 border">Aksi</th></tr></thead><tbody>`;
+  html += data.users.map(u => `
+    <tr>
+      <td class="p-2 border align-top">${u.id}</td>
+      <td class="p-2 border align-top">${u.first_name}</td>
+      <td class="p-2 border align-top">${u.last_name}</td>
+      <td class="p-2 border align-top">${u.email}</td>
+      <td class="p-2 border align-top break-words">${u.api_key || ''}</td>
+      <td class="p-2 border align-top">${u.status || '-'}</td>
+      <td class="p-2 border align-top">
+        <button class="updateBtn px-2 py-1 text-sm rounded bg-sky-600 text-white" data-id="${u.id}" data-first="${u.first_name}" data-last="${u.last_name}" data-email="${u.email}">Update</button>
+        <button class="deleteBtn ml-2 px-2 py-1 text-sm rounded bg-red-600 text-white" data-id="${u.id}">Hapus</button>
+      </td>
+    </tr>`).join('');
+  html += `</tbody></table>`;
+  el.innerHTML = html;
+
+  // listeners
+  document.querySelectorAll('.updateBtn').forEach(b => {
+    b.addEventListener('click', (e) => {
+      const id = e.target.dataset.id;
+      const first = e.target.dataset.first;
+      const last = e.target.dataset.last;
+      const email = e.target.dataset.email;
+      openModal(id, first, last, email);
+    });
+  });
+
+  document.querySelectorAll('.deleteBtn').forEach(b => {
+    b.addEventListener('click', async (e) => {
+      const id = e.target.dataset.id;
+      if (!confirm('Hapus user ini?')) return;
+      const r = await fetch(`/admin/users/${id}`, { method: 'DELETE', headers: authHeaders() });
+      const d = await r.json();
+      alert(d.message || 'Deleted');
+      fetchUsers(); fetchApiKeys(); fetchStatus();
+    });
+  });
+}
+
+async function fetchApiKeys(){
+  const res = await fetch('/admin/apikeys', { headers: authHeaders() });
+  if (res.status === 401 || res.status === 403) { alert('Unauthorized. Silakan login ulang.'); localStorage.removeItem('admin_token'); window.location.href='/admin.html'; return; }
+  const data = await res.json();
+  const el = document.getElementById('listApi');
+  if (!data.apiKeys.length) { el.innerHTML = '<div class="text-xs text-sky-600">Belum ada API key</div>'; return; }
+
+  let html = `<table class="min-w-full text-left border-collapse">
+    <thead><tr class="bg-sky-100"><th class="p-2 border">API Key</th><th class="p-2 border">Pemilik</th><th class="p-2 border">Status</th><th class="p-2 border">Aksi</th></tr></thead><tbody>`;
+  html += data.apiKeys.map(a => `
+    <tr>
+      <td class="p-2 border break-words">${a.api_key}</td>
+      <td class="p-2 border">${a.user_name || a.user_name_concat || '-'}</td>
+      <td class="p-2 border">${a.status}</td>
+      <td class="p-2 border">
+        <button class="toggleBtn px-2 py-1 text-sm rounded ${a.status==='active'?'bg-red-100 text-red-700':'bg-green-100 text-green-700'}" data-id="${a.id}">${a.status==='active'?'Deactivate':'Activate'}</button>
+        <button class="delKeyBtn ml-2 px-2 py-1 text-sm rounded bg-red-600 text-white" data-id="${a.id}">Hapus</button>
+      </td>
+    </tr>`).join('');
+  html += `</tbody></table>`;
+  el.innerHTML = html;
+
+  document.querySelectorAll('.toggleBtn').forEach(b => {
+    b.addEventListener('click', async (e) => {
+      const id = e.target.dataset.id;
+      const r = await fetch(`/admin/apikeys/${id}/toggle`, { method:'POST', headers: authHeaders() });
+      const d = await r.json();
+      alert(d.message || 'Updated');
+      fetchApiKeys();
+    });
+  });
+
+  document.querySelectorAll('.delKeyBtn').forEach(b => {
+    b.addEventListener('click', async (e) => {
+      const id = e.target.dataset.id;
+      if (!confirm('Hapus API key ini?')) return;
+      const r = await fetch(`/admin/apikeys/${id}`, { method:'DELETE', headers: authHeaders() });
+      const d = await r.json();
+      alert(d.message || 'Deleted');
+      fetchApiKeys(); fetchUsers(); fetchStatus();
+    });
+  });
+}
+
+async function fetchStatus(){
+  const res = await fetch('/admin/status', { headers: authHeaders() });
+  if (res.status === 401 || res.status === 403) { alert('Unauthorized. Silakan login ulang.'); localStorage.removeItem('admin_token'); window.location.href='/admin.html'; return; }
+  const data = await res.json();
+  document.getElementById('statusBox').innerHTML = `<div>Users: <strong>${data.usersCount}</strong></div><div>API Keys: <strong>${data.apiCount}</strong></div><div>Active API Keys: <strong>${data.activeCount}</strong></div>`;
+}
+
+// modal logic
+let currentUpdateId = null;
+function openModal(id, first, last, email){
+  currentUpdateId = id;
+  document.getElementById('u_first').value = first;
+  document.getElementById('u_last').value = last;
+  document.getElementById('u_email').value = email;
+  document.getElementById('modal').classList.remove('hidden');
+  document.getElementById('modal').classList.add('flex');
+}
+document.getElementById('u_cancel').addEventListener('click', () => {
+  document.getElementById('modal').classList.add('hidden');
+  document.getElementById('modal').classList.remove('flex');
+});
+document.getElementById('u_save').addEventListener('click', async () => {
+  const first = document.getElementById('u_first').value.trim();
+  const last = document.getElementById('u_last').value.trim();
+  const email = document.getElementById('u_email').value.trim();
+  if (!first || !last || !email) return alert('Lengkapi semua kolom');
+  const r = await fetch(`/admin/users/${currentUpdateId}`, { method:'PUT', headers: authHeaders(), body: JSON.stringify({ first_name: first, last_name: last, email }) });
+  const d = await r.json();
+  alert(d.message || 'Updated');
+  document.getElementById('modal').classList.add('hidden');
+  document.getElementById('modal').classList.remove('flex');
+  fetchUsers(); fetchApiKeys(); fetchStatus();
+});
+
+// on load, verify token
+(function init(){
+  const token = getToken();
+  if (!token) { window.location.href = '/admin.html'; return; }
+  fetchStatus(); fetchUsers(); fetchApiKeys();
+})();
+</script>
+</body>
+</html>

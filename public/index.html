@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Create API Key</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-sky-50 min-h-screen flex items-center justify-center">
+  <div class="bg-white p-8 rounded-lg shadow-lg w-full max-w-2xl">
+    <h3 class="text-2xl font-bold text-sky-800 mb-4">Daftar User & Generate API Key</h3>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div>
+        <label class="text-sm text-sky-700">First name</label>
+        <input id="first_name" placeholder="First name" class="w-full p-3 mt-1 border rounded" />
+      </div>
+      <div>
+        <label class="text-sm text-sky-700">Last name</label>
+        <input id="last_name" placeholder="Last name" class="w-full p-3 mt-1 border rounded" />
+      </div>
+      <div>
+        <label class="text-sm text-sky-700">Email</label>
+        <input id="email" placeholder="email@example.com" class="w-full p-3 mt-1 border rounded" />
+      </div>
+    </div>
+
+    <div class="mt-4 flex items-center gap-3">
+      <input id="apiKeyArea" readonly class="flex-1 p-3 border rounded bg-sky-50" placeholder="API key akan muncul di sini..." />
+      <button id="genBtn" class="bg-sky-600 text-white px-4 py-2 rounded hover:bg-sky-700">Generate Key</button>
+    </div>
+
+    <div class="mt-4 flex gap-3">
+      <button id="saveBtn" class="bg-emerald-600 text-white px-4 py-2 rounded hover:bg-emerald-700">Save & Generate API Key</button>
+      <button id="copyBtn" class="bg-sky-100 text-sky-700 px-4 py-2 rounded">Copy</button>
+      <button id="cekBtn" class="bg-white border px-4 py-2 rounded">Check Validity</button>
+      <button id="showBtn" class="ml-auto bg-white border px-4 py-2 rounded" onclick="location.href='/admin.html'">Admin</button>
+    </div>
+  </div>
+
+<script>
+  const firstName = document.getElementById('first_name');
+  const lastName = document.getElementById('last_name');
+  const email = document.getElementById('email');
+  const apiKeyArea = document.getElementById('apiKeyArea');
+
+  document.getElementById('genBtn').addEventListener('click', () => {
+    const k = [...crypto.getRandomValues(new Uint8Array(32))].map(b=>b.toString(16).padStart(2,'0')).join('');
+    apiKeyArea.value = k;
+  });
+
+  document.getElementById('saveBtn').addEventListener('click', async () => {
+    const body = {
+      first_name: firstName.value.trim(),
+      last_name: lastName.value.trim(),
+      email: email.value.trim(),
+      apiKey: apiKeyArea.value.trim() || undefined
+    };
+    if (!body.first_name || !body.last_name || !body.email) return alert('Lengkapi semua form');
+    try {
+      const res = await fetch('/user/create', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(body)
+      });
+      const data = await res.json();
+      if (!res.ok) return alert(data.message || 'Error');
+      apiKeyArea.value = data.apiKey;
+      alert('User tersimpan. API key dibuat.');
+      // optionally clear fields
+      firstName.value = ''; lastName.value = ''; email.value = '';
+    } catch(err) {
+      console.error(err);
+      alert('Server error');
+    }
+  });
+
+  document.getElementById('copyBtn').addEventListener('click', async () => {
+    if (!apiKeyArea.value) return alert('Belum ada API key.');
+    await navigator.clipboard.writeText(apiKeyArea.value);
+    alert('Copied!');
+  });
+
+  document.getElementById('cekBtn').addEventListener('click', async () => {
+    const k = apiKeyArea.value.trim();
+    if (!k) return alert('Belum ada API key.');
+    const res = await fetch('/cekapi', {
+      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ apiKey: k })
+    });
+    const data = await res.json();
+    alert(data.message || JSON.stringify(data));
+  });
+</script>
+</body>
+</html>
